@@ -5,11 +5,19 @@ The program is based on the libibverbs
 
 #include <stdlib.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <infiniband/verbs.h>
+#include <errno.h>
 
 const size_t SIZE = 1024;
 
 int main(int argc, char** argv)
-{
+{	int retval = ibv_fork_init();
+	if (0 != retval)
+	{
+		printf ("Failed! ibv_fork_init returned %d\n", retval);
+		exit(-1);
+	}
 
 }
 
