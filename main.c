@@ -26,8 +26,20 @@ int main(int argc, char** argv)
 
 	struct ibv_device** devlist = get_device_list();
 	struct ibv_device* dev = devlist[0];
+	char* dev_name = ibv_get_device_name(dev);
+	if (NULL == dev_name)
+	{
+		log_msg("Failed to get device name! leaving");
+		exit(-1);
+	}
+	log_msg("Picked device: %s", dev_name);
 
 	struct ibv_context* dev_ctx = get_dev_context(dev);
+	ibv_free_device_list(devlist);
+
+
+	// Free resources
+	ibv_close_device(dev_ctx);
 }
 
 int log_msg(const char* format, ...)
