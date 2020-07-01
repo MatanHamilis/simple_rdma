@@ -13,7 +13,7 @@ The program is based on the libibverbs
 const size_t SIZE = 1024;
 
 int log_msg(const char* format, ...);
-int get_device_list();
+struct ibv_device** get_device_list();
 struct ibv_context* get_dev_context(struct ibv_device* dev);
 
 int main(int argc, char** argv)
