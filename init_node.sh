@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 sudo apt-get update
-sudo apt-get -y install libibcm1 libibverbs1 ibverbs-utils librdmacm1 rdmacm-utils ibsim-utils ibutils libcxgb3-1 libibmad5 libibumad3 libmlx4-1 libmthca1 libnes1 rds-tools infiniband-diags libibcommon1 mstflint opensm libopensm5 perftest srptools libibverbs-dev librdmacm-dev
+sudo apt-get -y install rdma-core libibverbs1 ibverbs-utils librdmacm1 rdmacm-utils ibsim-utils ibutils libcxgb3-1 libibmad5 libibumad3 libmlx4-1 libmthca1 libnes1 infiniband-diags mstflint opensm libopensm5a perftest srptools libibverbs-dev librdmacm-dev
 
 sudo modprobe rdma_cm
 sudo modprobe ib_uverbs
