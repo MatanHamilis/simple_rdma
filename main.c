@@ -10,11 +10,14 @@ The program is based on the libibverbs
 #include <errno.h>
 #include <stdarg.h>
 
-const size_t SIZE = 1024;
+const size_t BUF_SIZE = 0x100000;
 
 int log_msg(const char* format, ...);
 struct ibv_device** get_device_list();
 struct ibv_context* get_dev_context();
+struct ibv_mr* register_mr(struct ibv_pd* pd, void* buf, size_t buf_len, enum ibv_access_flags access);
+void* alloc_mr(unsigned int size);
+struct ibv_pd* alloc_pd(struct ibv_context* ctx);
 
 int main(int argc, char** argv)
 {	
@@ -27,10 +30,60 @@ int main(int argc, char** argv)
 
 	struct ibv_context* dev_ctx = get_dev_context();
 
+	void* buf1 = alloc_mr(BUF_SIZE);
+	void* buf2 = alloc_mr(BUF_SIZE);
+	void* buf3 = alloc_mr(BUF_SIZE);
+
+	struct ibv_pd* pd = alloc_pd(dev_ctx);
+
+	struct ibv_mr* mr1 = register_mr(pd, buf1, BUF_SIZE, 0);
+	struct ibv_mr* mr2 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_LOCAL_WRITE);
+	struct ibv_mr* mr3 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
+
 	// Free resources
 	ibv_close_device(dev_ctx);
 }
 
+
+struct ibv_mr* register_mr(struct ibv_pd* pd, void* buf, size_t buf_len, enum ibv_access_flags access)
+{
+	log_msg("Trying to register MR:");
+	log_msg("\tpd = %p\n\tbuf = %p\n\tbuf_len = %u\n\taccess = %u", pd, buf, buf_len, access);
+
+	struct ibv_mr* ret_val = ibv_reg_mr(pd, buf, buf_len, access);
+	if (NULL == ret_val)
+	{
+		log_msg("Failed to register MR!");
+		exit(-1);
+	}
+	log_msg("MR Register finished successfully!");
+	return ret_val;
+}
+
+void* alloc_mr(unsigned int size)
+{
+	log_msg("Allocating MR of size %u", size);
+	void* mr = malloc(size);
+	if (NULL == mr)
+	{
+		log_msg("Failed to allocate MR!");
+		exit(-1);
+	}
+	log_msg("Allocated MR successfully!");
+	return mr;
+}
+
+struct ibv_pd* alloc_pd(struct ibv_context* ctx)
+{
+	struct ibv_pd* ret_val = ibv_alloc_pd(ctx);
+	if (NULL == ret_val)
+	{
+		log_msg("Failed to alloc pd");
+		exit(-1);
+	}
+
+	return ret_val;
+}
 
 int log_msg(const char* format, ...)
 {
@@ -86,19 +139,4 @@ struct ibv_context* get_dev_context()
 	log_msg("Device port 1 gid 0 = %llx : %llx", gid.global.subnet_prefix, gid.global.interface_id);
 
 	return dev_ctx;
-}
-
-// The client is the one connecting to the server and reading from / writing to a buffer residing in the server's memory.
-
-int do_client()
-{
-
-}
-
-
-// The server is the one allocating a buffer and waiting for messages from the client requesting perform read/write.
-int do_server()
-{
-	char* const buffer = (char*)malloc(SIZE * sizeof(char));
-	struct ibv_mr * mr;
 }
