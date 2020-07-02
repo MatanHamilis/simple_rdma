@@ -10,6 +10,7 @@ The program is based on the libibverbs
 #include <errno.h>
 #include <stdarg.h>
 
+const int CQE_SIZE = 100;
 const size_t BUF_SIZE = 0x100000;
 
 int log_msg(const char* format, ...);
@@ -22,6 +23,13 @@ void dereg_mr(struct ibv_mr* mr);
 
 void dealloc_pd(struct ibv_pd*);
 struct ibv_pd* alloc_pd(struct ibv_context* ctx);
+
+struct ibv_comp_channel* create_comp_channel(struct ibv_context* ctx);
+void destroy_comp_channel(struct ibv_comp_channel* ch);
+
+struct ibv_cq* create_cq(struct ibv_context*, int cqe, void* cq_context, struct ibv_comp_channel* ch, int comp_vector);
+void destroy_cq(struct ibv_cq* cq);
+
 
 int main(int argc, char** argv)
 {	
@@ -44,6 +52,13 @@ int main(int argc, char** argv)
 	struct ibv_mr* mr2 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_LOCAL_WRITE);
 	struct ibv_mr* mr3 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
 
+	struct ibv_comp_channel* ch = create_comp_channel(dev_ctx);
+	struct ibv_cq* cq_with_ch = create_cq(dev_ctx, CQE_SIZE, NULL, ch, 0);
+	struct ibv_cq* cq_no_ch = create_cq(dev_ctx, CQE_SIZE, NULL, NULL, 0);
+
+	destroy_cq(cq_no_ch);
+	destroy_cq(cq_with_ch);
+	destroy_comp_channel(ch);
 
 	dereg_mr(mr1);
 	dereg_mr(mr2);
@@ -58,6 +73,55 @@ int main(int argc, char** argv)
 	// Free resources
 	ibv_close_device(dev_ctx);
 }
+
+struct ibv_comp_channel* create_comp_channel(struct ibv_context* ctx)
+{
+	log_msg("Creating completion channel!\n\tctx = %p", ctx);
+	struct ibv_comp_channel* cch = ibv_create_comp_channel(ctx);
+	if (NULL == cch)
+	{
+		log_msg("Failed to create completion channel");
+		exit(-1);
+	}
+	log_msg("Completion channel created successfully!");
+	return cch;
+}
+
+void destroy_comp_channel(struct ibv_comp_channel* ch)
+{
+	log_msg("Destroying completion channel!\n\tch = %p", ch);
+	if (0 != ibv_destroy_comp_channel(ch))
+	{	
+		log_msg("Failed to destroy completion channel");
+		exit(-1);
+	}
+	log_msg("Destroyed channel successfully!");
+}
+
+struct ibv_cq* create_cq(struct ibv_context* ctx, int cqe, void* cq_context, struct ibv_comp_channel* ch, int comp_vector)
+{
+	log_msg("Creating CQ!\n\tcontext = %p\n\tcqe = %d\n\t private context = %p\n\tcompletion channel = %p\n\tcompletion vector = %d", ctx, cqe, cq_context, ch, comp_vector);
+	struct ibv_cq* cq = ibv_create_cq(ctx, cqe, cq_context, ch, comp_vector);
+	if (NULL == cq)
+	{	
+		log_msg("Failed to create CQ!");
+		exit(-1);
+	}
+	log_msg("Completion CQ successfully!");
+	return cq;
+}
+
+void destroy_cq(struct ibv_cq* cq)
+{
+	log_msg("Destroying CQ!\n\tcq = %p", cq);
+	if (0 != ibv_destroy_cq(cq))	
+	{
+		log_msg("Failed to destroy CQ");
+		exit(-1);
+	}
+	log_msg("Destoyed CQ successfully!");
+}
+
 
 void dealloc_pd(struct ibv_pd* pd)
 {
@@ -146,7 +210,7 @@ struct ibv_context* get_dev_context()
 {
 	struct ibv_device** devlist = get_device_list();
 	struct ibv_device* dev = devlist[0];
-	char* dev_name = ibv_get_device_name(dev);
+	const char* dev_name = ibv_get_device_name(dev);
 	if (NULL == dev_name)
 	{
 		log_msg("Failed to get device name! leaving");
