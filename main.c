@@ -15,8 +15,12 @@ const size_t BUF_SIZE = 0x100000;
 int log_msg(const char* format, ...);
 struct ibv_device** get_device_list();
 struct ibv_context* get_dev_context();
+
 struct ibv_mr* register_mr(struct ibv_pd* pd, void* buf, size_t buf_len, enum ibv_access_flags access);
 void* alloc_mr(unsigned int size);
+void dereg_mr(struct ibv_mr* mr);
+
+void dealloc_pd(struct ibv_pd*);
 struct ibv_pd* alloc_pd(struct ibv_context* ctx);
 
 int main(int argc, char** argv)
@@ -40,11 +44,42 @@ int main(int argc, char** argv)
 	struct ibv_mr* mr2 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_LOCAL_WRITE);
 	struct ibv_mr* mr3 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
 
+
+	dereg_mr(mr1);
+	dereg_mr(mr2);
+	dereg_mr(mr3);
+
+	dealloc_pd(pd);
+
+	free(buf1);
+	free(buf2);
+	free(buf3);
+
 	// Free resources
 	ibv_close_device(dev_ctx);
 }
 
+void dealloc_pd(struct ibv_pd* pd)
+{
+	log_msg("Deallocating PD:\n\tpd = %p", pd);
+	if (0 != ibv_dealloc_pd(pd))
+	{
+		log_msg("Failed to deallocate pd!");
+		exit(-1);
+	}
+	log_msg("PD Deallocated successfully!");
+}
 
+void dereg_mr(struct ibv_mr* mr)
+{
+	log_msg("Deregistering MR:\n\tmr = %p", mr);
+	if (0 != ibv_dereg_mr(mr))
+	{
+		log_msg("Failed to deregister MR");
+		exit(-1);
+	}
+	log_msg("Deregistered MR successfully!");
+}
 struct ibv_mr* register_mr(struct ibv_pd* pd, void* buf, size_t buf_len, enum ibv_access_flags access)
 {
 	log_msg("Trying to register MR:");
