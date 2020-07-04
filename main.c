@@ -12,6 +12,7 @@ The program is based on the libibverbs
 
 const int CQE_SIZE = 100;
 const size_t BUF_SIZE = 0x100000;
+const void* QP_CONTEXT = (void*)0x12345678;
 
 int log_msg(const char* format, ...);
 struct ibv_device** get_device_list();
@@ -30,6 +31,9 @@ void destroy_comp_channel(struct ibv_comp_channel* ch);
 struct ibv_cq* create_cq(struct ibv_context*, int cqe, void* cq_context, struct ibv_comp_channel* ch, int comp_vector);
 void destroy_cq(struct ibv_cq* cq);
 
+void destroy_qp(struct ibv_qp* qp);
+struct ibv_qp* create_qp(struct ibv_pd* pd, struct ibv_qp_init_attr* attr);
+struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq);
 
 int main(int argc, char** argv)
 {	
@@ -56,6 +60,11 @@ int main(int argc, char** argv)
 	struct ibv_cq* cq_with_ch = create_cq(dev_ctx, CQE_SIZE, NULL, ch, 0);
 	struct ibv_cq* cq_no_ch = create_cq(dev_ctx, CQE_SIZE, NULL, NULL, 0);
 
+	struct ibv_qp_init_attr qp_attrs = create_qp_init_attr(cq_with_ch);
+	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
+
+	destroy_qp(qp);
+
 	destroy_cq(cq_no_ch);
 	destroy_cq(cq_with_ch);
 	destroy_comp_channel(ch);
@@ -72,6 +81,52 @@ int main(int argc, char** argv)
 
 	// Free resources
 	ibv_close_device(dev_ctx);
+}
+
+struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq)
+{
+	enum ibv_qp_type qptype = IBV_QPT_RC;
+
+	struct ibv_qp_init_attr attr = {
+		.qp_context = QP_CONTEXT,
+		.send_cq = cq,
+		.recv_cq = cq,
+		.srq = NULL,
+		.qp_type = qptype,
+		.sq_sig_all = 1
+	};
+
+	attr.cap.max_send_wr = 10;
+	attr.cap.max_recv_wr = 1;
+	attr.cap.max_send_sge = 10;
+	attr.cap.max_recv_sge = 10;
+	attr.cap.max_inline_data = 32;
+	return attr;
+}
+
+void destroy_qp(struct ibv_qp* qp)
+{
+	log_msg("Destroying QP now");
+	if (0 != ibv_destroy_qp(qp))
+	{
+		log_msg("Failed to destroy QP!");
+		exit(-1);
+	}
+	log_msg("QP Destroyed successfully!");
+}
+
+struct ibv_qp* create_qp(struct ibv_pd* pd, struct ibv_qp_init_attr* attr)
+{
+	log_msg("Creating QP!\n\tpd = %p\n\tattr = %p", pd, attr);
+	struct ibv_qp* qp = ibv_create_qp(pd, attr);
+	if (NULL == qp)
+	{
+		log_msg("Failed to create QP!");
+		exit(-1);
+	}
+	log_msg("QP created successfully!");
+	log_msg("Setting QP Properties...");
+	return qp;
 }
 
 struct ibv_comp_channel* create_comp_channel(struct ibv_context* ctx)
