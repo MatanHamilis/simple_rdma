@@ -3,6 +3,10 @@ In this file I'm going to implement simple RDMA program, testing the latency of 
 The program is based on the libibverbs
 */
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -13,6 +17,17 @@ The program is based on the libibverbs
 const int CQE_SIZE = 100;
 const size_t BUF_SIZE = 0x100000;
 const void* QP_CONTEXT = (void*)0x12345678;
+const uint8_t IB_PORT_NUMBER = 1;
+
+typedef struct 
+{
+	uint32_t qp_num;
+	uint16_t port_lid;
+	uint64_t remote_addr;
+	uint32_t rkey;
+} ConnectionInfoExchange;
+
+ConnectionInfoExchange prepare_exchange_info(struct ibv_qp*, struct ibv_context*, struct ibv_mr*);
 
 int log_msg(const char* format, ...);
 struct ibv_device** get_device_list();
@@ -81,6 +96,121 @@ int main(int argc, char** argv)
 
 	// Free resources
 	ibv_close_device(dev_ctx);
+}
+
+// Exchanges local info with peer. Returns the peer info.
+ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExchange my_info)
+{
+	int total_sent = 0;
+	char* to_send = &my_info;
+	while (total_sent < sizeof(my_info))
+	{
+		int current_sent = send(peer_sock, to_send + total_sent, sizeof(my_info) - total_sent, 0);
+		if (-1 == current_sent)
+		{
+			log_msg("Failed to send! errno = %s", strerror(errno));
+			exit(-1);
+		}
+		total_sent += current_sent;
+	}
+
+	ConnectionInfoExchange peer_info;
+	int total_received = 0;
+	char* to_recv = &peer_info;
+	while (total_received < sizeof(peer_info))
+	{
+		int current_received = recv(peer_sock, to_recv + total_received, sizeof(peer_info) - total_received, 0);
+		if (-1 == current_received)
+		{
+			log_msg("Failed to receive msg. errno = %s", strerror(errno));
+			exit(-1);
+		}
+		total_received += current_received;
+	}
+
+	close(peer_sock);
+	return peer_info;
+
+}
+
+int do_connect_server(int16_t listen_port)
+{
+	int sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0)
+	{
+		log_msg("Failed to create socket, errno = %s", strerror(errno));
+		exit(-1);
+	}
+
+	struct sockaddr_in addr;
+	addr.sin_port = listen_port;
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = INADDR_ANY;
+	if (0 != bind(sock, &addr, sizeof(addr)))
+	{
+		log_msg("Failed to bind to interface! port = %hu, errno = %s", listen_port, strerror(errno));
+		exit(-1);
+	}
+
+	if (0 != listen(sock, 1))
+	{
+		log_msg("Failed to start listening on socket. errno = %s", strerror(errno));
+		exit(-1);
+	}
+
+	int client_sock = accept(sock, &addr, sizeof(addr));
+	if (-1 == client_sock)
+	{
+		log_msg("Failed to accept connection! errno = %s", strerror(errno));
+		exit(-1);
+	}
+
+	close(sock);
+	return client_sock;
+}
+
+int do_connect_client(uint16_t portno, char* ipv4_addr)
+{
+	int sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0)
+	{
+		log_msg("Failed to create socket, errno = %s", strerror(errno));
+		exit(-1);
+	}
+
+	struct sockaddr_in addr;
+	addr.sin_family = AF_INET;
+	addr.sin_port = portno;
+	if (1 != inet_aton(ipv4_addr, &addr.sin_addr))
+	{
+		log_msg("Failed to parse ipv4 address! Address got: %s", ipv4_addr);
+		exit(-1);
+	}
+
+	if (0 != connect(sock, &addr, sizeof(addr)))
+	{
+		log_msg("Failed to connect! Errno = %s", strerror(errno));
+		exit(-1);
+	}
+
+	return sock;
+}
+
+ConnectionInfoExchange prepare_exchange_info(struct ibv_qp* qp, struct ibv_context* ctx, struct ibv_mr* mr)
+{
+	ConnectionInfoExchange cie;
+	cie.qp_num = qp->qp_num;
+	
+	struct ibv_port_attr port_attr;
+	if (0 != ibv_query_port(ctx, IB_PORT_NUMBER, &port_attr))
+	{
+		log_msg("Failed to fetch port attributes!");
+		exit(-1);
+	}
+	cie.port_lid = port_attr.lid;
+	cie.remote_addr = mr->addr;
+	cie.rkey = mr->rkey;
+	return cie;
 }
 
 struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq)
