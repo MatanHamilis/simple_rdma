@@ -3,6 +3,7 @@ In this file I'm going to implement simple RDMA program, testing the latency of 
 The program is based on the libibverbs
 */
 
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -49,8 +50,57 @@ void destroy_cq(struct ibv_cq* cq);
 void destroy_qp(struct ibv_qp* qp);
 struct ibv_qp* create_qp(struct ibv_pd* pd, struct ibv_qp_init_attr* attr);
 struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq);
+int do_server(uint16_t port_no);
+int do_client(char* server_addr, uint16_t port_no);
+
+int do_connect_server(int16_t listen_port);
+ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExchange my_info);
+void print_help(char* prog_name);
+
 
 int main(int argc, char** argv)
+{
+	uint16_t port = 12345;
+	char* server_addr = NULL;
+	int c;
+	while ((c = getopt(argc,argv,"p:a:h")) != -1) 
+	{
+		switch(c)
+		{
+			case 'h':
+				print_help(argv[0]);
+				exit(-1);
+				break;
+			case 'a':
+				server_addr	= optarg;
+				break;
+			case 'p':
+				port = strtol(optarg, NULL, 10);
+				break;
+		}
+	}
+
+	if (server_addr == NULL)
+	{
+		return do_server(port);
+	}
+	return do_client(server_addr, port);
+}
+
+void print_help(char* prog_name)
+{
+	log_msg("Usage: %s [-a server_addr] [-p port] [-h]", prog_name);
+	log_msg("\t -h - print this help and exit");
+	log_msg("\t -a - set to client mode and specify the server's IP address, otherwise - server mode.");
+	log_msg("\t -p - specify the port number to connect to (default: 12345)");
+}
+
+int do_client(char* server_addr, uint16_t port)
+{
+	return 0;
+}
+
+int do_server(uint16_t port_no)
 {	
 	int retval = ibv_fork_init();
 	if (0 != retval)
@@ -78,6 +128,17 @@ int main(int argc, char** argv)
 	struct ibv_qp_init_attr qp_attrs = create_qp_init_attr(cq_with_ch);
 	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
 
+	int server_sock = do_connect_server(port_no);
+	ConnectionInfoExchange my_info;
+	my_info.port_lid = 0;
+	my_info.remote_addr = (uint64_t)mr1->addr;
+	my_info.rkey = mr1->rkey;
+	my_info.qp_num = qp->qp_num;
+	ConnectionInfoExchange info = exchange_info_with_peer(server_sock, my_info);
+
+
+	
+
 	destroy_qp(qp);
 
 	destroy_cq(cq_no_ch);
@@ -98,6 +159,30 @@ int main(int argc, char** argv)
 	ibv_close_device(dev_ctx);
 }
 
+void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
+{
+	struct ibv_qp_attr attr;
+
+	//RESET -> INIT 
+	attr.qp_state = IBV_QPS_INIT;
+	attr.pkey_index = 0;
+	attr.port_num = 1;
+	if (-1 == ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT))
+	{
+		log_msg("Failed to change states: RESET -> INIT");
+		exit(-1);
+	}
+
+
+
+}
+void print_connection_info(ConnectionInfoExchange* info)
+{
+	log_msg("[QP Info] LID=\t%hu", info->port_lid);
+	log_msg("[QP Info] QP Number=\t%u",info->qp_num);
+	log_msg("[QP Info] MR=\t%llu",info->remote_addr);
+	log_msg("[QP Info] rkey=\t%u",info->rkey);
+}
 // Exchanges local info with peer. Returns the peer info.
 ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExchange my_info)
 {
@@ -129,6 +214,7 @@ ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExch
 	}
 
 	close(peer_sock);
+	print_connection_info(&peer_info);
 	return peer_info;
 
 }
