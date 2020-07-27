@@ -27,11 +27,13 @@ ConnectionInfoExchange prepare_exchange_info(struct ibv_qp* qp, struct ibv_conte
 	{
 		cie.rkey = mr->rkey;
 		cie.remote_addr = (uint64_t)mr->addr;
+		cie.size_in_bytes = mr->length;
 	} 
 	else
 	{
 		cie.rkey = 0;
 		cie.remote_addr = 0;
+		cie.size_in_bytes = 0;
 	}
 	return cie;
 }
@@ -160,4 +162,5 @@ void print_connection_info(ConnectionInfoExchange* info)
 	log_msg("[QP Info] QPN\t=\t%u",info->qp_num);
 	log_msg("[QP Info] MR\t=\t%llu",info->remote_addr);
 	log_msg("[QP Info] rkey\t=\t%u",info->rkey);
+	log_msg("[QP Info] size\t=\t%x", info->size_in_bytes);
 }

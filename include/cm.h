@@ -9,6 +9,7 @@ typedef struct
 	uint16_t port_lid;
 	uint64_t remote_addr;
 	uint32_t rkey;
+	uint32_t size_in_bytes;
 } ConnectionInfoExchange;
 
 ConnectionInfoExchange prepare_exchange_info(struct ibv_qp*, struct ibv_context*, struct ibv_mr*);
