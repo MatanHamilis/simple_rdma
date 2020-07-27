@@ -212,3 +212,61 @@ void do_close_device(struct ibv_context* dev_ctx)
 		exit(-1);
 	}
 }
+
+void do_rdma_read(void* remote_address, void* local_address, uint32_t rkey, uint32_t lkey, uint32_t size, struct ibv_qp* qp)
+{
+	struct ibv_sge sge_entry = {
+		.addr = (uint64_t)local_address,
+		.length = 4,
+		.lkey = lkey
+	};
+	struct ibv_send_wr* bad_wr = NULL;
+	struct ibv_send_wr wr = {
+		.wr_id = 1,
+		.next = NULL,
+		.sg_list = &sge_entry,
+		.num_sge = 1,
+		.opcode = IBV_WR_RDMA_READ,
+		.send_flags = 0,
+		.wr.rdma.remote_addr = (uint64_t)remote_address,
+		.wr.rdma.rkey = rkey
+	};
+	int	ans = ibv_req_notify_cq(qp->send_cq, 0);
+	if (0 != ans)
+	{
+		log_msg("Failed to req_notify_cq! errno = %s (%d)", strerror(ans), ans);
+		exit(-1);
+	}
+	void* ev_ctx = NULL;
+	ans = ibv_post_send(qp, &wr, &bad_wr);
+	if (0 != ans)
+	{
+		log_msg("Failed to post_send! errno = %s (%d)", strerror(ans), ans);
+		exit(-1);
+	}
+	int ret = ibv_get_cq_event(qp->send_cq->channel, &qp->send_cq, &ev_ctx);
+	if (ret)
+	{
+		log_msg("Failed to fetch event from the CQ.");
+		exit(-1);
+	}
+
+	ibv_ack_cq_events(qp->send_cq, 1);
+	while ( 1 )
+	{
+		struct ibv_wc wc;
+		int ne = ibv_poll_cq(qp->send_cq, 1, &wc);
+		if (!ne)  break;
+		if (ne < 0)
+		{
+			log_msg("Error in ibv_poll_cq! Value returned = %d", ne);
+			exit(-1);
+		}
+		if (wc.status != IBV_WC_SUCCESS)
+		{
+			log_msg("Received WQE but the WR failed! Status = %s (%d)", ibv_wc_status_str(wc.status), wc.status);
+			exit(-1);
+		}
+	}
+
+}

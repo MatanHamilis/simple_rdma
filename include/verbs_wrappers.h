@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdint.h>
 #include <infiniband/verbs.h>
 
 #include "logging.h"
@@ -19,4 +20,5 @@ void* alloc_mr(unsigned int size);
 struct ibv_pd* alloc_pd(struct ibv_context* ctx);
 struct ibv_device** get_device_list();
 struct ibv_context* get_dev_context();
+void do_rdma_read(void* remote_address, void* local_address, uint32_t rkey, uint32_t lkey, uint32_t size, struct ibv_qp* qp);
 void do_close_device(struct ibv_context* dev_ctx);
