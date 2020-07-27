@@ -13,10 +13,11 @@ The program is based on the libibverbs
 #include <stdio.h>
 #include <infiniband/verbs.h>
 #include <errno.h>
+#include <getopt.h>
 #include <stdarg.h>
 
 const int CQE_SIZE = 100;
-const size_t BUF_SIZE = 0x100000;
+const size_t BUF_SIZE = 0x1001;
 const void* QP_CONTEXT = (void*)0x12345678;
 const uint8_t IB_PORT_NUMBER = 1;
 
@@ -54,6 +55,7 @@ int do_server(uint16_t port_no);
 int do_client(char* server_addr, uint16_t port_no);
 
 int do_connect_server(int16_t listen_port);
+int do_connect_client(uint16_t portno, char* ipv4_addr);
 ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExchange my_info);
 void print_help(char* prog_name);
 
@@ -77,13 +79,23 @@ int main(int argc, char** argv)
 			case 'p':
 				port = strtol(optarg, NULL, 10);
 				break;
+			default:
+				print_help(argv[0]);
+				exit(-1);
+				break;
 		}
 	}
-
+	if (optind != argc)
+	{
+		print_help(argv[0]);
+		exit(-1);
+	}	
 	if (server_addr == NULL)
 	{
+		log_msg("I'm a server! Listening on port: %hu", port);
 		return do_server(port);
 	}
+	log_msg("I'm a client. Connectiong to: %s:%hu", server_addr, port);
 	return do_client(server_addr, port);
 }
 
@@ -97,6 +109,77 @@ void print_help(char* prog_name)
 
 int do_client(char* server_addr, uint16_t port)
 {
+	int ans = 0;
+	struct ibv_context* dev_ctx = get_dev_context();
+	struct ibv_pd* pd = alloc_pd(dev_ctx);
+	struct ibv_comp_channel* ch = create_comp_channel(dev_ctx);
+	struct ibv_cq* cq_with_ch = create_cq(dev_ctx, CQE_SIZE, NULL, ch, 0);
+	struct ibv_qp_init_attr qp_attrs = create_qp_init_attr(cq_with_ch);
+	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
+	int client_sock = do_connect_client(port, server_addr);
+	ConnectionInfoExchange my_info = prepare_exchange_info(qp, dev_ctx, NULL);
+	ConnectionInfoExchange peer_info = exchange_info_with_peer(client_sock, my_info);
+	void* buf = alloc_mr(BUF_SIZE);
+	struct ibv_mr* mr = register_mr(pd, buf, BUF_SIZE, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+	setup_qp(&peer_info, qp);
+	struct ibv_sge sge_entry = {
+		.addr = mr->addr,
+		.length = 4,
+		.lkey = mr->lkey
+	};
+	struct ibv_send_wr* bad_wr = NULL;
+	struct ibv_send_wr wr = {
+		.wr_id = 1,
+		.next = NULL,
+		.sg_list = &sge_entry,
+		.num_sge = 1,
+		.opcode = IBV_WR_RDMA_READ,
+		.send_flags = 0,
+		.wr.rdma.remote_addr = peer_info.remote_addr,
+		.wr.rdma.rkey = peer_info.rkey
+	};
+
+	ans = ibv_req_notify_cq(cq_with_ch, 0);
+	if (0 != ans)
+	{
+		log_msg("Failed to req_notify_cq! errno = %s (%d)", strerror(ans), ans);
+		exit(-1);
+	}
+	void* ev_ctx = NULL;
+	ans = ibv_post_send(qp, &wr, &bad_wr);
+	if (0 != ans)
+	{
+		log_msg("Failed to post_send! errno = %s (%d)", strerror(ans), ans);
+		exit(-1);
+	}
+	int ret = ibv_get_cq_event(ch, &cq_with_ch, &ev_ctx);
+	if (ret)
+	{
+		log_msg("Failed to fetch event from the CQ.");
+		exit(-1);
+	}
+
+	ibv_ack_cq_events(cq_with_ch, 1);
+	while ( 1 )
+	{
+		struct ibv_wc wc;
+		int ne = ibv_poll_cq(cq_with_ch, 1, &wc);
+		if (!ne)  break;
+		if (ne < 0)
+		{
+			log_msg("Error in ibv_poll_cq! Value returned = %d", ne);
+			exit(-1);
+		}
+		if (wc.status != IBV_WC_SUCCESS)
+		{
+			log_msg("Received WQE but the WR failed! Status = %s (%d)", ibv_wc_status_str(wc.status), wc.status);
+			exit(-1);
+		}
+
+		log_msg("WR id %d finished successfully!", wc.wr_id);
+	}
+
+	log_msg("The first int in the buffer is: %d", ((int*)buf)[0]);
 	return 0;
 }
 
@@ -111,15 +194,12 @@ int do_server(uint16_t port_no)
 
 	struct ibv_context* dev_ctx = get_dev_context();
 
-	void* buf1 = alloc_mr(BUF_SIZE);
-	void* buf2 = alloc_mr(BUF_SIZE);
-	void* buf3 = alloc_mr(BUF_SIZE);
+	void* buf = alloc_mr(BUF_SIZE);
+	((int*)buf)[0] = 0x12345678;
 
 	struct ibv_pd* pd = alloc_pd(dev_ctx);
 
-	struct ibv_mr* mr1 = register_mr(pd, buf1, BUF_SIZE, 0);
-	struct ibv_mr* mr2 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_LOCAL_WRITE);
-	struct ibv_mr* mr3 = register_mr(pd, buf1, BUF_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
+	struct ibv_mr* mr = register_mr(pd, buf, BUF_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
 
 	struct ibv_comp_channel* ch = create_comp_channel(dev_ctx);
 	struct ibv_cq* cq_with_ch = create_cq(dev_ctx, CQE_SIZE, NULL, ch, 0);
@@ -129,31 +209,21 @@ int do_server(uint16_t port_no)
 	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
 
 	int server_sock = do_connect_server(port_no);
-	ConnectionInfoExchange my_info;
-	my_info.port_lid = 0;
-	my_info.remote_addr = (uint64_t)mr1->addr;
-	my_info.rkey = mr1->rkey;
-	my_info.qp_num = qp->qp_num;
-	ConnectionInfoExchange info = exchange_info_with_peer(server_sock, my_info);
-
-
-	
-
+	ConnectionInfoExchange my_info = prepare_exchange_info(qp, dev_ctx, mr);
+	ConnectionInfoExchange peer_info = exchange_info_with_peer(server_sock, my_info);
+	setup_qp(&peer_info, qp);
+	sleep(1);
 	destroy_qp(qp);
 
 	destroy_cq(cq_no_ch);
 	destroy_cq(cq_with_ch);
 	destroy_comp_channel(ch);
 
-	dereg_mr(mr1);
-	dereg_mr(mr2);
-	dereg_mr(mr3);
+	dereg_mr(mr);
 
 	dealloc_pd(pd);
 
-	free(buf1);
-	free(buf2);
-	free(buf3);
+	free(buf);
 
 	// Free resources
 	ibv_close_device(dev_ctx);
@@ -167,21 +237,54 @@ void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
 	attr.qp_state = IBV_QPS_INIT;
 	attr.pkey_index = 0;
 	attr.port_num = 1;
-	if (-1 == ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT))
+	attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE |  IBV_ACCESS_REMOTE_READ;
+	if (0 != ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS))
 	{
 		log_msg("Failed to change states: RESET -> INIT");
 		exit(-1);
 	}
 
+	log_msg("RESET -> INIT QP Set Successfully");
+	attr.qp_state = IBV_QPS_RTR;
+	attr.path_mtu = IBV_MTU_512;
+	attr.ah_attr.dlid = info->port_lid;
+	attr.ah_attr.is_global = 0;
+	attr.ah_attr.sl = 0;
+	attr.ah_attr.port_num = 1;
+	attr.dest_qp_num = info->qp_num;
+	attr.rq_psn = 1;
+	attr.max_dest_rd_atomic = 0;
+	attr.min_rnr_timer = 12;
 
+	if (0 != ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_AV | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER))
+	{
+		log_msg("Failed to change states: INIT -> RTR");
+		exit(-1);
+	}
 
+	log_msg("INIT -> RTR QP Set Successfully");
+
+	attr.qp_state = IBV_QPS_RTS;
+	attr.timeout = 14;
+	attr.retry_cnt = 7;
+	attr.rnr_retry = 7;
+	attr.sq_psn = 1;
+	attr.max_rd_atomic = 0;
+
+	if (0 != ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC))
+	{
+		log_msg("Failed to change state: RTR -> RTS");
+		exit(-1);
+	}
+
+	log_msg("RNR -> RTR QP Set Successfully");
 }
 void print_connection_info(ConnectionInfoExchange* info)
 {
-	log_msg("[QP Info] LID=\t%hu", info->port_lid);
-	log_msg("[QP Info] QP Number=\t%u",info->qp_num);
-	log_msg("[QP Info] MR=\t%llu",info->remote_addr);
-	log_msg("[QP Info] rkey=\t%u",info->rkey);
+	log_msg("[QP Info] LID\t=\t%hu", info->port_lid);
+	log_msg("[QP Info] QPN\t=\t%u",info->qp_num);
+	log_msg("[QP Info] MR\t=\t%llu",info->remote_addr);
+	log_msg("[QP Info] rkey\t=\t%u",info->rkey);
 }
 // Exchanges local info with peer. Returns the peer info.
 ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExchange my_info)
@@ -232,6 +335,7 @@ int do_connect_server(int16_t listen_port)
 	addr.sin_port = listen_port;
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
+	socklen_t addr_size = sizeof(addr);
 	if (0 != bind(sock, &addr, sizeof(addr)))
 	{
 		log_msg("Failed to bind to interface! port = %hu, errno = %s", listen_port, strerror(errno));
@@ -244,7 +348,7 @@ int do_connect_server(int16_t listen_port)
 		exit(-1);
 	}
 
-	int client_sock = accept(sock, &addr, sizeof(addr));
+	int client_sock = accept(sock, &addr, &addr_size);
 	if (-1 == client_sock)
 	{
 		log_msg("Failed to accept connection! errno = %s", strerror(errno));
@@ -294,8 +398,16 @@ ConnectionInfoExchange prepare_exchange_info(struct ibv_qp* qp, struct ibv_conte
 		exit(-1);
 	}
 	cie.port_lid = port_attr.lid;
-	cie.remote_addr = mr->addr;
-	cie.rkey = mr->rkey;
+	if (NULL != mr)
+	{
+		cie.rkey = mr->rkey;
+		cie.remote_addr = mr->addr;
+	} 
+	else
+	{
+		cie.rkey = 0;
+		cie.remote_addr = 0;
+	}
 	return cie;
 }
 
