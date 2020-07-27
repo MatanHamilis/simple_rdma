@@ -24,7 +24,7 @@ void print_help(char* prog_name);
 
 int main(int argc, char** argv)
 {
-	const uint16_t port = 12345;
+	uint16_t port = 12345;
 	char* server_addr = NULL;
 	int c;
 	while ((c = getopt(argc,argv,"p:a:h")) != -1) 

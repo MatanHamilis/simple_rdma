@@ -1,6 +1,6 @@
 #include "verbs_wrappers.h"
 
-const void* QP_CONTEXT = (void*)0x12345678;
+void* const QP_CONTEXT = (void*)0x12345678;
 
 struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq)
 {
@@ -12,14 +12,14 @@ struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq)
 		.recv_cq = cq,
 		.srq = NULL,
 		.qp_type = qptype,
-		.sq_sig_all = 1
+		.sq_sig_all = 1,
+		.cap.max_send_sge = 10,
+		.cap.max_recv_sge = 10,
+		.cap.max_recv_wr = 10,
+		.cap.max_recv_wr = 1,
+		.cap.max_inline_data = 32
 	};
 
-	attr.cap.max_send_wr = 10;
-	attr.cap.max_recv_wr = 1;
-	attr.cap.max_send_sge = 10;
-	attr.cap.max_recv_sge = 10;
-	attr.cap.max_inline_data = 32;
 	return attr;
 }
 
