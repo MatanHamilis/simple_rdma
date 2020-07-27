@@ -20,13 +20,11 @@ const size_t BUF_SIZE = 0x1001;
 int do_server(uint16_t port_no);
 int do_client(char* server_addr, uint16_t port_no);
 void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp);
-
 void print_help(char* prog_name);
-
 
 int main(int argc, char** argv)
 {
-	uint16_t port = 12345;
+	const uint16_t port = 12345;
 	char* server_addr = NULL;
 	int c;
 	while ((c = getopt(argc,argv,"p:a:h")) != -1) 
