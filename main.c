@@ -58,6 +58,7 @@ int do_connect_server(int16_t listen_port);
 int do_connect_client(uint16_t portno, char* ipv4_addr);
 ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExchange my_info);
 void print_help(char* prog_name);
+void do_sync(int sock);
 
 
 int main(int argc, char** argv)
@@ -122,6 +123,7 @@ int do_client(char* server_addr, uint16_t port)
 	void* buf = alloc_mr(BUF_SIZE);
 	struct ibv_mr* mr = register_mr(pd, buf, BUF_SIZE, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
 	setup_qp(&peer_info, qp);
+	do_sync(client_sock);
 	struct ibv_sge sge_entry = {
 		.addr = mr->addr,
 		.length = 4,
@@ -180,7 +182,64 @@ int do_client(char* server_addr, uint16_t port)
 	}
 
 	log_msg("The first int in the buffer is: %d", ((int*)buf)[0]);
+	do_sync(client_sock);
+
+	dereg_mr(mr);
+	free(buf);
+	destroy_qp(qp);
+	destroy_cq(cq_with_ch);
+	destroy_comp_channel(ch);
+	dealloc_pd(pd);
+	do_close_device(dev_ctx);
 	return 0;
+}
+
+
+void do_close_device(struct ibv_context* dev_ctx)
+{
+	if (ibv_close_device(dev_ctx))
+	{
+		log_msg("Failed to close device!");
+		exit(-1);
+	}
+}
+void do_send(int sock, char* buf, int size)
+{
+	int total_sent = 0;
+	int ans = 0;
+	while (total_sent < size)
+	{
+		ans = send(sock, buf+total_sent, size - total_sent, 0);
+		if (ans < 0)
+		{
+			log_msg("Failed to send! errno = %s (%d)", strerror(ans), ans);
+			exit(-1);
+		}
+		total_sent += ans;
+	}
+}
+void do_recv(int sock, char* buf, int size)
+{
+	int total_recv = 0;
+	int ans = 0;
+	while (total_recv < size)
+	{
+		ans = recv(sock, buf+total_recv, size - total_recv, 0);
+		if (ans < 0)
+		{
+			log_msg("Failed to recv! errno = %s (%d)", strerror(ans), ans);
+			exit(-1);
+		}
+		total_recv += ans;
+	}
+}
+
+void do_sync(int sock)
+{
+	int ans = 0;
+	int buf = 'a';
+	do_send(sock, &buf, 1);
+	do_recv(sock, &buf, 1);
 }
 
 int do_server(uint16_t port_no)
@@ -212,7 +271,8 @@ int do_server(uint16_t port_no)
 	ConnectionInfoExchange my_info = prepare_exchange_info(qp, dev_ctx, mr);
 	ConnectionInfoExchange peer_info = exchange_info_with_peer(server_sock, my_info);
 	setup_qp(&peer_info, qp);
-	sleep(1);
+	do_sync(server_sock);
+	do_sync(server_sock);
 	destroy_qp(qp);
 
 	destroy_cq(cq_no_ch);
@@ -225,8 +285,7 @@ int do_server(uint16_t port_no)
 
 	free(buf);
 
-	// Free resources
-	ibv_close_device(dev_ctx);
+	do_close_device(dev_ctx);
 }
 
 void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
@@ -253,7 +312,7 @@ void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
 	attr.ah_attr.port_num = 1;
 	attr.dest_qp_num = info->qp_num;
 	attr.rq_psn = 1;
-	attr.max_dest_rd_atomic = 0;
+	attr.max_dest_rd_atomic = 1;
 	attr.min_rnr_timer = 12;
 
 	if (0 != ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_AV | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER))
@@ -269,7 +328,7 @@ void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
 	attr.retry_cnt = 7;
 	attr.rnr_retry = 7;
 	attr.sq_psn = 1;
-	attr.max_rd_atomic = 0;
+	attr.max_rd_atomic = 1;
 
 	if (0 != ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC))
 	{
@@ -316,7 +375,6 @@ ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExch
 		total_received += current_received;
 	}
 
-	close(peer_sock);
 	print_connection_info(&peer_info);
 	return peer_info;
 
