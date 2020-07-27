@@ -4,4 +4,7 @@ add_executable(main main.c verbs_wrappers.c logging.c cm.c)
 find_library(   IBVERBS 
                 NAMES ibverbs 
 )
+target_include_directories(main 
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 target_link_libraries(main ${IBVERBS})

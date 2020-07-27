@@ -1,6 +1,9 @@
+#include <stdlib.h>
 #include <infiniband/verbs.h>
 
-extern const void* QP_CONTEXT;
+#include "logging.h"
+
+extern void* const QP_CONTEXT;
 
 struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq);
 void destroy_qp(struct ibv_qp* qp);
