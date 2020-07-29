@@ -10,12 +10,17 @@ The program is based on the libibverbs
 #include <errno.h>
 #include <getopt.h>
 
+#include "memutils.h"
+#include "cache_exhauster.h"
 #include "verbs_wrappers.h"
 #include "logging.h"
 #include "cm.h"
 
-const int CQE_SIZE = 100;
-const size_t BUF_SIZE = 0x1001;
+const unsigned int CQE_SIZE = 10;
+const unsigned int CLIENT_BUF_SIZE = 1;
+
+#define SERVER_BUFFER_SIZE (PAGE_SIZE * PREFETCH_GROUP_SIZE)
+
 
 int do_server(uint16_t port_no);
 int do_client(char* server_addr, uint16_t port_no);
@@ -79,17 +84,16 @@ int do_client(char* server_addr, uint16_t port)
 	struct ibv_qp_init_attr qp_attrs = create_qp_init_attr(cq_with_ch);
 	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
 	int client_sock = do_connect_client(port, server_addr);
-	ConnectionInfoExchange my_info = prepare_exchange_info(qp, dev_ctx, NULL);
-	ConnectionInfoExchange peer_info = exchange_info_with_peer(client_sock, my_info);
-	void* buf = alloc_mr(BUF_SIZE);
-	struct ibv_mr* mr = register_mr(pd, buf, BUF_SIZE, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+	ConnectionInfoExchange* peer_info = exchange_info_with_peer(client_sock, qp, dev_ctx, NULL, 0);
+	void* buf = alloc_mr(CLIENT_BUF_SIZE);
+	struct ibv_mr* mr = register_mr(pd, buf, CLIENT_BUF_SIZE, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
 	setup_qp(&peer_info, qp);
 	do_sync(client_sock);
-	do_rdma_read((void*)peer_info.remote_addr, buf, peer_info.rkey, mr->lkey, BUF_SIZE, qp);
-	log_msg("The first int in the buffer is: %d", ((int*)buf)[0]);
+	logic_attacker(qp, peer_info, buf, mr->lkey);
 	do_sync(client_sock);
 
 	dereg_mr(mr);
+	free(peer_info);
 	free(buf);
 	destroy_qp(qp);
 	destroy_cq(cq_with_ch);
@@ -109,13 +113,22 @@ int do_server(uint16_t port_no)
 	}
 
 	struct ibv_context* dev_ctx = get_dev_context();
-
-	void* buf = alloc_mr(BUF_SIZE);
-	((int*)buf)[0] = 0x12345678;
-
 	struct ibv_pd* pd = alloc_pd(dev_ctx);
+	struct ibv_mr* mrs[SERVER_NUMBER_OF_MRS];
 
-	struct ibv_mr* mr = register_mr(pd, buf, BUF_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+	int mr_idx = 0;
+	const uint64_t BASE_OFFSET = 1<<(UPPER_INDEX_LAST_BIT + 1);
+	for (uint64_t i = 1<<(LOWER_INDEX_FIRST_BIT) ; i < 1<<(LOWER_INDEX_LAST_BIT + 1) ; i += 1<<(LOWER_INDEX_FIRST_BIT))
+	{
+		void* buf = allocate_at_addr((void*)(BASE_OFFSET + i), SERVER_BUFFER_SIZE);
+		mrs[mr_idx++] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+	}
+
+	for (uint64_t i = 1<<(UPPER_INDEX_FIRST_BIT) ; i < 1<<(UPPER_INDEX_LAST_BIT + 1) ; i += 1<<(UPPER_INDEX_FIRST_BIT))
+	{
+		void* buf = allocate_at_addr((void*)(BASE_OFFSET + i), SERVER_BUFFER_SIZE);
+		mrs[mr_idx++] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+	}
 
 	struct ibv_comp_channel* ch = create_comp_channel(dev_ctx);
 	struct ibv_cq* cq_with_ch = create_cq(dev_ctx, CQE_SIZE, NULL, ch, 0);
@@ -125,10 +138,10 @@ int do_server(uint16_t port_no)
 	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
 
 	int server_sock = do_connect_server(port_no);
-	ConnectionInfoExchange my_info = prepare_exchange_info(qp, dev_ctx, mr);
-	ConnectionInfoExchange peer_info = exchange_info_with_peer(server_sock, my_info);
+	ConnectionInfoExchange* peer_info = exchange_info_with_peer(server_sock, qp, dev_ctx, mrs, SERVER_NUMBER_OF_MRS);
 	setup_qp(&peer_info, qp);
 	do_sync(server_sock);
+	log_msg("Waiting for client to finish his attack now...");
 	do_sync(server_sock);
 	destroy_qp(qp);
 
@@ -136,12 +149,13 @@ int do_server(uint16_t port_no)
 	destroy_cq(cq_with_ch);
 	destroy_comp_channel(ch);
 
-	dereg_mr(mr);
+	for (unsigned int i = 0 ; i < SERVER_NUMBER_OF_MRS ; ++i)
+	{
+		free(mrs[i]->addr);
+		dereg_mr(mrs[i]);
+	}
 
 	dealloc_pd(pd);
-
-	free(buf);
-
 	do_close_device(dev_ctx);
 }
 
@@ -163,11 +177,11 @@ void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
 	log_msg("RESET -> INIT QP Set Successfully");
 	attr.qp_state = IBV_QPS_RTR;
 	attr.path_mtu = IBV_MTU_512;
-	attr.ah_attr.dlid = info->port_lid;
+	attr.ah_attr.dlid = info->header.port_lid;
 	attr.ah_attr.is_global = 0;
 	attr.ah_attr.sl = 0;
 	attr.ah_attr.port_num = 1;
-	attr.dest_qp_num = info->qp_num;
+	attr.dest_qp_num = info->header.qp_num;
 	attr.rq_psn = 1;
 	attr.max_dest_rd_atomic = 1;
 	attr.min_rnr_timer = 12;

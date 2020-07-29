@@ -11,33 +11,6 @@
 
 const uint8_t IB_PORT_NUMBER = 1;
 
-ConnectionInfoExchange prepare_exchange_info(struct ibv_qp* qp, struct ibv_context* ctx, struct ibv_mr* mr)
-{
-	ConnectionInfoExchange cie;
-	cie.qp_num = qp->qp_num;
-	
-	struct ibv_port_attr port_attr;
-	if (0 != ibv_query_port(ctx, IB_PORT_NUMBER, &port_attr))
-	{
-		log_msg("Failed to fetch port attributes!");
-		exit(-1);
-	}
-	cie.port_lid = port_attr.lid;
-	if (NULL != mr)
-	{
-		cie.rkey = mr->rkey;
-		cie.remote_addr = (uint64_t)mr->addr;
-		cie.size_in_bytes = mr->length;
-	} 
-	else
-	{
-		cie.rkey = 0;
-		cie.remote_addr = 0;
-		cie.size_in_bytes = 0;
-	}
-	return cie;
-}
-
 void do_send(int sock, char* buf, int size)
 {
 	int total_sent = 0;
@@ -78,14 +51,49 @@ void do_sync(int sock)
 	do_recv(sock, &buf, 1);
 }
 
-ConnectionInfoExchange exchange_info_with_peer(int peer_sock, ConnectionInfoExchange my_info)
+ConnectionInfoExchange* exchange_info_with_peer(int peer_sock, struct ibv_qp* qp, struct ibv_context* dev_ctx, struct ibv_mr** mrs, uint32_t number_of_mrs)
 {
-	int total_sent = 0;
-    do_send(peer_sock, (char*)&my_info, sizeof(my_info));
+	ConnectionInfoExchange* peer_info = NULL;
+	uint32_t total_bytes_for_struct = sizeof(peer_info->header) + number_of_mrs * sizeof(MrEntry);
+	ConnectionInfoExchange* my_info = malloc(total_bytes_for_struct);
+	if (NULL == my_info)
+	{
+		log_msg("Failed to malloc! leaving...");
+		exit(-1);
+	}
 
-	ConnectionInfoExchange peer_info;
-	int total_received = 0;
-    do_recv(peer_sock, (char*)&peer_info, sizeof(peer_info));
+	struct ibv_port_attr port_attrs;
+	if (0 != ibv_query_port(dev_ctx, IB_PORT_NUMBER, &port_attrs))
+	{
+		log_msg("Failed to fetch port attributes!");
+		exit(-1);
+	}
+
+	my_info->header.number_of_mrs = number_of_mrs;
+	my_info->header.port_lid = port_attrs.lid;
+	my_info->header.qp_num = qp->qp_num;
+
+	for (uint32_t i = 0 ; i < number_of_mrs ; ++i)
+	{
+		my_info->mrs[i].remote_addr = mrs[i]->addr;
+		my_info->mrs[i].rkey = mrs[i]->rkey;
+		my_info->mrs[i].size_in_bytes = mrs[i]->length;
+	}
+
+	do_send(peer_sock, &total_bytes_for_struct, sizeof(total_bytes_for_struct));
+    do_send(peer_sock, (char*)&my_info, total_bytes_for_struct);
+	free(my_info);
+	do_recv(peer_sock, &total_bytes_for_struct, sizeof(total_bytes_for_struct));
+
+	peer_info =  malloc(total_bytes_for_struct);
+	if (NULL == peer_info)
+	{
+		log_msg("Failed top malloc! leaving...");
+		exit(-1);
+	}
+
+
+    do_recv(peer_sock, (char*)&peer_info, total_bytes_for_struct);
 
 	print_connection_info(&peer_info);
 	return peer_info;
@@ -158,9 +166,15 @@ int do_connect_client(uint16_t portno, char* ipv4_addr)
 
 void print_connection_info(ConnectionInfoExchange* info)
 {
-	log_msg("[QP Info] LID\t=\t%hu", info->port_lid);
-	log_msg("[QP Info] QPN\t=\t%u",info->qp_num);
-	log_msg("[QP Info] MR\t=\t%llu",info->remote_addr);
-	log_msg("[QP Info] rkey\t=\t%u",info->rkey);
-	log_msg("[QP Info] size\t=\t%x", info->size_in_bytes);
+
+	log_msg("[QP Info] LID\t=\t%hu", info->header.port_lid);
+	log_msg("[QP Info] QPN\t=\t%u",info->header.qp_num);
+	log_msg("[QP Info] Number of MRs\t=\t%u",info->header.number_of_mrs);
+	for (uint32_t i = 0 ; i < info->header.number_of_mrs ; ++i)
+	{
+		log_msg("[QP Info] \t[% 6u]", i);
+		log_msg("[QP Info] \t\tMR\t=\t%llu",info->mrs[i].remote_addr);
+		log_msg("[QP Info] \t\trkey\t=\t%u",info->mrs[i].rkey);
+		log_msg("[QP Info] \t\tsize\t=\t%x", info->mrs[i].size_in_bytes);
+	}
 }
