@@ -125,19 +125,20 @@ int do_server(uint16_t port_no)
 	struct ibv_mr* mrs[SERVER_NUMBER_OF_MRS];
 
 	int mr_idx = 0;
-	const uint64_t BASE_OFFSET = ((uint64_t)1)<<(UPPER_INDEX_LAST_BIT + 10);
+	const uint64_t BASE_OFFSET_LOWER = ((uint64_t)1)<<(UPPER_INDEX_LAST_BIT + 9);
+	const uint64_t BASE_OFFSET_UPPER = ((uint64_t)1)<<(UPPER_INDEX_LAST_BIT + 10);
 	for (uint64_t i = 0 ; i < 1<<(LOWER_INDEX_LAST_BIT + 1) ; i += 1<<(LOWER_INDEX_FIRST_BIT))
 	{
 		log_msg("Registering MR id: %d", mr_idx);
-		void* buf = allocate_at_addr((void*)(BASE_OFFSET + i), SERVER_BUFFER_SIZE);
+		void* buf = allocate_at_addr((void*)(BASE_OFFSET_LOWER + i), SERVER_BUFFER_SIZE);
 		mrs[mr_idx] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
 		++mr_idx;
 	}
 
-	for (uint64_t i = 1<<(UPPER_INDEX_FIRST_BIT) ; i < 1<<(UPPER_INDEX_LAST_BIT + 1) ; i += 1<<(UPPER_INDEX_FIRST_BIT))
+	for (uint64_t i = 0 ; i < ((uint64_t)1)<<(UPPER_INDEX_LAST_BIT + 1) ; i += 1<<(UPPER_INDEX_FIRST_BIT))
 	{
 		log_msg("Registering MR id: %d", mr_idx);
-		void* buf = allocate_at_addr((void*)(BASE_OFFSET + i), SERVER_BUFFER_SIZE);
+		void* buf = allocate_at_addr((void*)(BASE_OFFSET_UPPER + i), SERVER_BUFFER_SIZE);
 		mrs[mr_idx] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
 		++mr_idx;
 	}
