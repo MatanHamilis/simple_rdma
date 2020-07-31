@@ -31,7 +31,8 @@ int do_connect_client(uint16_t portno, char* ipv4_addr);
 void do_sync(int sock);
 void do_send(int sock, char* buf, int size);
 void do_recv(int sock, char* buf, int size);
-ConnectionInfoExchange* exchange_info_with_peer(int peer_sock, struct ibv_qp*, struct ibv_context*, struct ibv_mr**, uint32_t number_of_mrs);
+void send_info_to_peer(int peer_sock, struct ibv_qp* qps, struct ibv_context* dev_ctx, struct ibv_mr** mrs, uint32_t number_of_mrs);
+ConnectionInfoExchange* receive_info_from_peer(int peer_sock);
 void print_connection_info(ConnectionInfoExchange* info);
 
 #endif 

@@ -51,7 +51,22 @@ void do_sync(int sock)
 	do_recv(sock, &buf, 1);
 }
 
-ConnectionInfoExchange* exchange_info_with_peer(int peer_sock, struct ibv_qp* qp, struct ibv_context* dev_ctx, struct ibv_mr** mrs, uint32_t number_of_mrs)
+void send_buf_to_peer(int peer_sock, char* buf, uint64_t buf_size)
+{
+	do_send(peer_sock, (char*)&buf_size, sizeof(buf_size));
+	do_send(peer_sock, buf, buf_size);
+}
+
+uint64_t recv_buf_from_peer(int peer_sock, void** ptr)
+{
+	uint64_t buf_size;
+	do_recv(peer_sock, &buf_size, sizeof(buf_size));
+	*ptr = do_malloc(buf_size);
+	do_recv(peer_sock, *ptr, buf_size);
+	return buf_size;
+}
+
+void send_info_to_peer(int peer_sock, struct ibv_qp* qp, struct ibv_context* dev_ctx, struct ibv_mr** mrs, uint32_t number_of_mrs)
 {
 	ConnectionInfoExchange* peer_info = NULL;
 	uint32_t total_bytes_for_struct = sizeof(peer_info->header) + number_of_mrs * sizeof(MrEntry);
@@ -80,24 +95,16 @@ ConnectionInfoExchange* exchange_info_with_peer(int peer_sock, struct ibv_qp* qp
 		my_info->mrs[i].size_in_bytes = mrs[i]->length;
 	}
 
-	do_send(peer_sock, &total_bytes_for_struct, sizeof(total_bytes_for_struct));
-    do_send(peer_sock, (char*)&my_info, total_bytes_for_struct);
+	send_buf_to_peer(peer_sock, (char*)(my_info), total_bytes_for_struct);
 	free(my_info);
-	do_recv(peer_sock, &total_bytes_for_struct, sizeof(total_bytes_for_struct));
+}
 
-	peer_info =  malloc(total_bytes_for_struct);
-	if (NULL == peer_info)
-	{
-		log_msg("Failed top malloc! leaving...");
-		exit(-1);
-	}
-
-
-    do_recv(peer_sock, (char*)&peer_info, total_bytes_for_struct);
-
+ConnectionInfoExchange* receive_info_from_peer(int peer_sock)
+{
+	ConnectionInfoExchange* peer_info = NULL;
+	recv_buf_from_peer(peer_sock, &peer_info);
 	print_connection_info(&peer_info);
 	return peer_info;
-
 }
 
 int do_connect_server(int16_t listen_port)
@@ -126,7 +133,9 @@ int do_connect_server(int16_t listen_port)
 		exit(-1);
 	}
 
+	log_msg("Waiting for client to connect...");
 	int client_sock = accept(sock, (struct sockaddr*)&addr, &addr_size);
+	log_msg("Done! Client has connected");
 	if (-1 == client_sock)
 	{
 		log_msg("Failed to accept connection! errno = %s", strerror(errno));
@@ -168,7 +177,6 @@ void print_connection_info(ConnectionInfoExchange* info)
 {
 
 	log_msg("[QP Info] LID\t=\t%hu", info->header.port_lid);
-	log_msg("[QP Info] QPN\t=\t%u",info->header.qp_num);
 	log_msg("[QP Info] Number of MRs\t=\t%u",info->header.number_of_mrs);
 	for (uint32_t i = 0 ; i < info->header.number_of_mrs ; ++i)
 	{

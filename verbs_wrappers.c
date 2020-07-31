@@ -44,7 +44,6 @@ struct ibv_qp* create_qp(struct ibv_pd* pd, struct ibv_qp_init_attr* attr)
 		exit(-1);
 	}
 	log_msg("QP created successfully!");
-	log_msg("Setting QP Properties...");
 	return qp;
 }
 
@@ -126,7 +125,7 @@ struct ibv_mr* register_mr(struct ibv_pd* pd, void* buf, size_t buf_len, enum ib
 	struct ibv_mr* ret_val = ibv_reg_mr(pd, buf, buf_len, access);
 	if (NULL == ret_val)
 	{
-		log_msg("Failed to register MR!");
+		log_msg("Failed to register MR! errno: %s (%u)", strerror(errno), errno);
 		exit(-1);
 	}
 	log_msg("MR Register finished successfully!");

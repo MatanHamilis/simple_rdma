@@ -9,6 +9,8 @@ The program is based on the libibverbs
 #include <infiniband/verbs.h>
 #include <errno.h>
 #include <getopt.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 
 #include "memutils.h"
 #include "cache_exhauster.h"
@@ -22,13 +24,15 @@ const unsigned int CLIENT_BUF_SIZE = 1;
 #define SERVER_BUFFER_SIZE (PAGE_SIZE * PREFETCH_GROUP_SIZE)
 
 
+void release_memlock_limits();
 int do_server(uint16_t port_no);
 int do_client(char* server_addr, uint16_t port_no);
-void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp);
+void setup_qp(uint32_t qp_num, uint16_t port_lid, struct ibv_qp* qp);
 void print_help(char* prog_name);
 
 int main(int argc, char** argv)
 {
+	release_memlock_limits();
 	uint16_t port = 12345;
 	char* server_addr = NULL;
 	int c;
@@ -77,28 +81,32 @@ void print_help(char* prog_name)
 int do_client(char* server_addr, uint16_t port)
 {
 	int ans = 0;
+	int client_sock = do_connect_client(port, server_addr);
+	ConnectionInfoExchange* peer_info = receive_info_from_peer(client_sock);
 	struct ibv_context* dev_ctx = get_dev_context();
-	struct ibv_pd* pd = alloc_pd(dev_ctx);
 	struct ibv_comp_channel* ch = create_comp_channel(dev_ctx);
 	struct ibv_cq* cq_with_ch = create_cq(dev_ctx, CQE_SIZE, NULL, ch, 0);
 	struct ibv_qp_init_attr qp_attrs = create_qp_init_attr(cq_with_ch);
-	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
-	int client_sock = do_connect_client(port, server_addr);
-	ConnectionInfoExchange* peer_info = exchange_info_with_peer(client_sock, qp, dev_ctx, NULL, 0);
+
 	void* buf = alloc_mr(CLIENT_BUF_SIZE);
+	struct ibv_pd* pd = alloc_pd(dev_ctx);
+	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
 	struct ibv_mr* mr = register_mr(pd, buf, CLIENT_BUF_SIZE, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
-	setup_qp(&peer_info, qp);
+	send_info_to_peer(client_sock, qp, dev_ctx, &mr, 1);
+	setup_qp(peer_info->header.qp_num, peer_info->header.port_lid, qp);
+
 	do_sync(client_sock);
 	logic_attacker(qp, peer_info, buf, mr->lkey);
 	do_sync(client_sock);
 
 	dereg_mr(mr);
+	destroy_qp(qp);
+	dealloc_pd(pd);
+
 	free(peer_info);
 	free(buf);
-	destroy_qp(qp);
 	destroy_cq(cq_with_ch);
 	destroy_comp_channel(ch);
-	dealloc_pd(pd);
 	do_close_device(dev_ctx);
 	return 0;
 }
@@ -117,17 +125,21 @@ int do_server(uint16_t port_no)
 	struct ibv_mr* mrs[SERVER_NUMBER_OF_MRS];
 
 	int mr_idx = 0;
-	const uint64_t BASE_OFFSET = 1<<(UPPER_INDEX_LAST_BIT + 1);
-	for (uint64_t i = 1<<(LOWER_INDEX_FIRST_BIT) ; i < 1<<(LOWER_INDEX_LAST_BIT + 1) ; i += 1<<(LOWER_INDEX_FIRST_BIT))
+	const uint64_t BASE_OFFSET = ((uint64_t)1)<<(UPPER_INDEX_LAST_BIT + 10);
+	for (uint64_t i = 0 ; i < 1<<(LOWER_INDEX_LAST_BIT + 1) ; i += 1<<(LOWER_INDEX_FIRST_BIT))
 	{
+		log_msg("Registering MR id: %d", mr_idx);
 		void* buf = allocate_at_addr((void*)(BASE_OFFSET + i), SERVER_BUFFER_SIZE);
-		mrs[mr_idx++] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+		mrs[mr_idx] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+		++mr_idx;
 	}
 
 	for (uint64_t i = 1<<(UPPER_INDEX_FIRST_BIT) ; i < 1<<(UPPER_INDEX_LAST_BIT + 1) ; i += 1<<(UPPER_INDEX_FIRST_BIT))
 	{
+		log_msg("Registering MR id: %d", mr_idx);
 		void* buf = allocate_at_addr((void*)(BASE_OFFSET + i), SERVER_BUFFER_SIZE);
-		mrs[mr_idx++] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+		mrs[mr_idx] = register_mr(pd, buf, SERVER_BUFFER_SIZE, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+		++mr_idx;
 	}
 
 	struct ibv_comp_channel* ch = create_comp_channel(dev_ctx);
@@ -138,13 +150,15 @@ int do_server(uint16_t port_no)
 	struct ibv_qp* qp = create_qp(pd, &qp_attrs);
 
 	int server_sock = do_connect_server(port_no);
-	ConnectionInfoExchange* peer_info = exchange_info_with_peer(server_sock, qp, dev_ctx, mrs, SERVER_NUMBER_OF_MRS);
-	setup_qp(&peer_info, qp);
+	send_info_to_peer(server_sock, qp, dev_ctx, mrs, SERVER_NUMBER_OF_MRS);
+	ConnectionInfoExchange* peer_info = receive_info_from_peer(server_sock);
+	setup_qp(peer_info->header.qp_num, peer_info->header.port_lid, qp);
+
 	do_sync(server_sock);
 	log_msg("Waiting for client to finish his attack now...");
 	do_sync(server_sock);
-	destroy_qp(qp);
 
+	destroy_qp(qp); 
 	destroy_cq(cq_no_ch);
 	destroy_cq(cq_with_ch);
 	destroy_comp_channel(ch);
@@ -156,10 +170,11 @@ int do_server(uint16_t port_no)
 	}
 
 	dealloc_pd(pd);
+	free(peer_info);
 	do_close_device(dev_ctx);
 }
 
-void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
+void setup_qp(uint32_t qp_num, uint16_t port_lid, struct ibv_qp* qp)
 {
 	struct ibv_qp_attr attr;
 
@@ -177,11 +192,11 @@ void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
 	log_msg("RESET -> INIT QP Set Successfully");
 	attr.qp_state = IBV_QPS_RTR;
 	attr.path_mtu = IBV_MTU_512;
-	attr.ah_attr.dlid = info->header.port_lid;
+	attr.ah_attr.dlid = port_lid;
 	attr.ah_attr.is_global = 0;
 	attr.ah_attr.sl = 0;
 	attr.ah_attr.port_num = 1;
-	attr.dest_qp_num = info->header.qp_num;
+	attr.dest_qp_num = qp_num;
 	attr.rq_psn = 1;
 	attr.max_dest_rd_atomic = 1;
 	attr.min_rnr_timer = 12;
@@ -208,4 +223,17 @@ void setup_qp(ConnectionInfoExchange* info, struct ibv_qp* qp)
 	}
 
 	log_msg("RNR -> RTR QP Set Successfully");
+}
+
+void release_memlock_limits()
+{
+	struct rlimit l;
+	l.rlim_cur = RLIM_INFINITY;
+	l.rlim_max = RLIM_INFINITY;
+	
+	if (0 != setrlimit(RLIMIT_MEMLOCK, &l))
+	{
+		log_msg("Failed to set memlock ulimit - errno = %s (%u)",strerror(errno), errno);
+		exit(-1);
+	}
 }

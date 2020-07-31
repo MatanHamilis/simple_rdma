@@ -12,5 +12,6 @@ void* allocate_at_addr(void* addr, uint32_t size_in_bytes);
 
 // Frees an address allocated using the previous function.
 void free_at_addr(void* ptr, uint32_t size_in_bytes);
+void* do_malloc(uint64_t bytes);
 
 #endif
