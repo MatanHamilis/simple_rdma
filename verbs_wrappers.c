@@ -16,7 +16,7 @@ struct ibv_qp_init_attr create_qp_init_attr(struct ibv_cq* cq)
 		.cap.max_send_sge = 10,
 		.cap.max_recv_sge = 10,
 		.cap.max_recv_wr = 10,
-		.cap.max_recv_wr = 1,
+		.cap.max_send_wr = 2048,
 		.cap.max_inline_data = 32
 	};
 
@@ -216,7 +216,7 @@ void do_rdma_read(void* remote_address, void* local_address, uint32_t rkey, uint
 {
 	struct ibv_sge sge_entry = {
 		.addr = (uint64_t)local_address,
-		.length = 1,
+		.length = size,
 		.lkey = lkey
 	};
 	struct ibv_send_wr* bad_wr = NULL;
@@ -236,26 +236,23 @@ void do_rdma_read(void* remote_address, void* local_address, uint32_t rkey, uint
 		log_msg("Failed to req_notify_cq! errno = %s (%d)", strerror(ans), ans);
 		exit(-1);
 	}
-	void* ev_ctx = NULL;
 	ans = ibv_post_send(qp, &wr, &bad_wr);
 	if (0 != ans)
 	{
 		log_msg("Failed to post_send! errno = %s (%d)", strerror(ans), ans);
 		exit(-1);
 	}
-	int ret = ibv_get_cq_event(qp->send_cq->channel, &qp->send_cq, &ev_ctx);
-	if (ret)
-	{
-		log_msg("Failed to fetch event from the CQ.");
-		exit(-1);
-	}
 
-	ibv_ack_cq_events(qp->send_cq, 1);
-	while ( 1 )
+}
+
+void do_cq_empty(struct ibv_qp* qp, uint32_t num_events)
+{
+	uint32_t i = 0 ;
+	while ( i < num_events )
 	{
 		struct ibv_wc wc;
 		int ne = ibv_poll_cq(qp->send_cq, 1, &wc);
-		if (!ne)  break;
+//		if (!ne)  break;
 		if (ne < 0)
 		{
 			log_msg("Error in ibv_poll_cq! Value returned = %d", ne);
@@ -266,6 +263,6 @@ void do_rdma_read(void* remote_address, void* local_address, uint32_t rkey, uint
 			log_msg("Received WQE but the WR failed! Status = %s (%d)", ibv_wc_status_str(wc.status), wc.status);
 			exit(-1);
 		}
+		i += ne;
 	}
-
 }

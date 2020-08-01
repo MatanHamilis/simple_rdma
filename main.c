@@ -18,7 +18,7 @@ The program is based on the libibverbs
 #include "logging.h"
 #include "cm.h"
 
-const unsigned int CQE_SIZE = 10;
+const unsigned int CQE_SIZE = 2048;
 const unsigned int CLIENT_BUF_SIZE = 1;
 
 #define SERVER_BUFFER_SIZE (PAGE_SIZE * PREFETCH_GROUP_SIZE)
@@ -84,9 +84,8 @@ int do_client(char* server_addr, uint16_t port)
 	int client_sock = do_connect_client(port, server_addr);
 	ConnectionInfoExchange* peer_info = receive_info_from_peer(client_sock);
 	struct ibv_context* dev_ctx = get_dev_context();
-	struct ibv_comp_channel* ch = create_comp_channel(dev_ctx);
-	struct ibv_cq* cq_with_ch = create_cq(dev_ctx, CQE_SIZE, NULL, ch, 0);
-	struct ibv_qp_init_attr qp_attrs = create_qp_init_attr(cq_with_ch);
+	struct ibv_cq* cq = create_cq(dev_ctx, CQE_SIZE, NULL, NULL, 0);
+	struct ibv_qp_init_attr qp_attrs = create_qp_init_attr(cq);
 
 	void* buf = alloc_mr(CLIENT_BUF_SIZE);
 	struct ibv_pd* pd = alloc_pd(dev_ctx);
@@ -105,8 +104,7 @@ int do_client(char* server_addr, uint16_t port)
 
 	free(peer_info);
 	free(buf);
-	destroy_cq(cq_with_ch);
-	destroy_comp_channel(ch);
+	destroy_cq(cq);
 	do_close_device(dev_ctx);
 	return 0;
 }
