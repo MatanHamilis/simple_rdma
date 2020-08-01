@@ -158,7 +158,7 @@ int do_server(uint16_t port_no)
 	do_sync(server_sock);
 	log_msg("Waiting for client to finish his attack now...");
 	do_sync(server_sock);
-
+	close(server_sock);
 	destroy_qp(qp); 
 	destroy_cq(cq_no_ch);
 	destroy_cq(cq_with_ch);
@@ -166,8 +166,9 @@ int do_server(uint16_t port_no)
 
 	for (unsigned int i = 0 ; i < SERVER_NUMBER_OF_MRS ; ++i)
 	{
-		free(mrs[i]->addr);
+		void* addr = mrs[i]->addr;
 		dereg_mr(mrs[i]);
+		free_at_addr(addr, SERVER_BUFFER_SIZE);
 	}
 
 	dealloc_pd(pd);

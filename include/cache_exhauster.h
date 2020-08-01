@@ -13,7 +13,8 @@ const unsigned int UPPER_INDEX_FIRST_BIT;
 const unsigned int UPPER_INDEX_LAST_BIT;
 #define SERVER_NUMBER_OF_MRS \
 	((1<<(LOWER_INDEX_LAST_BIT + 1 - LOWER_INDEX_FIRST_BIT)) + \
-	(1<<(UPPER_INDEX_LAST_BIT + 1 - UPPER_INDEX_FIRST_BIT)) - 1)
+	(1<<(UPPER_INDEX_LAST_BIT + 1 - UPPER_INDEX_FIRST_BIT)))
 
 void logic_attacker(struct ibv_qp* qp, ConnectionInfoExchange* peer_info, void* local_buf, uint32_t lkey);
+void sigint_handler(int value);
 #endif

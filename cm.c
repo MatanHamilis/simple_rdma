@@ -8,6 +8,7 @@
 
 #include "cm.h"
 #include "logging.h"
+#include "memutils.h"
 
 const uint8_t IB_PORT_NUMBER = 1;
 
@@ -36,7 +37,7 @@ void do_recv(int sock, char* buf, int size)
 		ans = recv(sock, buf+total_recv, size - total_recv, 0);
 		if (ans < 0)
 		{
-			log_msg("Failed to recv! errno = %s (%d)", strerror(ans), ans);
+			log_msg("Failed to recv! errno = %s (%d)", strerror(errno), errno);
 			exit(-1);
 		}
 		total_recv += ans;
@@ -53,6 +54,7 @@ void do_sync(int sock)
 
 void send_buf_to_peer(int peer_sock, char* buf, uint64_t buf_size)
 {
+	log_msg("Sending buf of size: %llu");
 	do_send(peer_sock, (char*)&buf_size, sizeof(buf_size));
 	do_send(peer_sock, buf, buf_size);
 }
@@ -60,8 +62,9 @@ void send_buf_to_peer(int peer_sock, char* buf, uint64_t buf_size)
 uint64_t recv_buf_from_peer(int peer_sock, void** ptr)
 {
 	uint64_t buf_size;
-	do_recv(peer_sock, &buf_size, sizeof(buf_size));
-	*ptr = do_malloc(buf_size);
+	do_recv(peer_sock, (char*)&buf_size, sizeof(buf_size));
+	void* buf = do_malloc(buf_size);
+	*ptr = 	buf;
 	do_recv(peer_sock, *ptr, buf_size);
 	return buf_size;
 }
@@ -90,7 +93,7 @@ void send_info_to_peer(int peer_sock, struct ibv_qp* qp, struct ibv_context* dev
 
 	for (uint32_t i = 0 ; i < number_of_mrs ; ++i)
 	{
-		my_info->mrs[i].remote_addr = mrs[i]->addr;
+		my_info->mrs[i].remote_addr = (uint64_t)(mrs[i]->addr);
 		my_info->mrs[i].rkey = mrs[i]->rkey;
 		my_info->mrs[i].size_in_bytes = mrs[i]->length;
 	}
@@ -102,8 +105,8 @@ void send_info_to_peer(int peer_sock, struct ibv_qp* qp, struct ibv_context* dev
 ConnectionInfoExchange* receive_info_from_peer(int peer_sock)
 {
 	ConnectionInfoExchange* peer_info = NULL;
-	recv_buf_from_peer(peer_sock, &peer_info);
-	print_connection_info(&peer_info);
+	recv_buf_from_peer(peer_sock, (void**)(&peer_info));
+	print_connection_info(peer_info);
 	return peer_info;
 }
 

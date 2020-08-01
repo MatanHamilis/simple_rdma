@@ -216,7 +216,7 @@ void do_rdma_read(void* remote_address, void* local_address, uint32_t rkey, uint
 {
 	struct ibv_sge sge_entry = {
 		.addr = (uint64_t)local_address,
-		.length = 4,
+		.length = 1,
 		.lkey = lkey
 	};
 	struct ibv_send_wr* bad_wr = NULL;

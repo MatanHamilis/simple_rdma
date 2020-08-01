@@ -31,8 +31,6 @@ void free_at_addr(void* ptr, uint32_t size_in_bytes)
         log_msg("Catastrophic error happened with memory management - leaving!");
         exit(-1);
     }
-
-    return 0;
 }
 
 void* do_malloc(uint64_t bytes)
