@@ -17,6 +17,9 @@ The program is based on the libibverbs
 #include "verbs_wrappers.h"
 #include "logging.h"
 #include "cm.h"
+#include "latency_measure.h"
+
+typedef void(*LogicFunction)(struct ibv_qp*, ConnectionInfoExchange*, void*, uint32_t);
 
 const unsigned int CQE_SIZE = 2048;
 const unsigned int CLIENT_BUF_SIZE = 1;
@@ -26,17 +29,21 @@ const unsigned int CLIENT_BUF_SIZE = 1;
 
 void release_memlock_limits();
 int do_server(uint16_t port_no);
-int do_client(char* server_addr, uint16_t port_no);
+int do_client(char* server_addr, uint16_t port_no, LogicFunction logic);
 void setup_qp(uint32_t qp_num, uint16_t port_lid, struct ibv_qp* qp);
 void print_help(char* prog_name);
 
 int main(int argc, char** argv)
 {
+	const int MODE_EXHAUSTER = 1;
+	const int MODE_LATENCY = 2;
 	release_memlock_limits();
 	uint16_t port = 12345;
+	int mode = 0;
 	char* server_addr = NULL;
+	LogicFunction logic = NULL;
 	int c;
-	while ((c = getopt(argc,argv,"p:a:h")) != -1) 
+	while ((c = getopt(argc,argv,"p:a:hle")) != -1) 
 	{
 		switch(c)
 		{
@@ -50,6 +57,24 @@ int main(int argc, char** argv)
 			case 'p':
 				port = strtol(optarg, NULL, 10);
 				break;
+			case 'l':
+				if (mode != 0)
+				{
+					print_help(argv[0]);
+					exit(-1);
+				}
+				mode = MODE_LATENCY;
+				logic = logic_latency;
+				break;
+			case 'e':
+				if (mode != 0)
+				{
+					print_help(argv[0]);
+					exit(-1);
+				}
+				mode = MODE_EXHAUSTER;
+				logic = logic_attacker;
+				break;
 			default:
 				print_help(argv[0]);
 				exit(-1);
@@ -61,24 +86,32 @@ int main(int argc, char** argv)
 		print_help(argv[0]);
 		exit(-1);
 	}	
+	if (mode == 0)
+	{
+		log_msg("No mode set, use [-l] or [-e]");
+		print_help(argv[0]);
+		exit(-1);
+	}
 	if (server_addr == NULL)
 	{
 		log_msg("I'm a server! Listening on port: %hu", port);
 		return do_server(port);
 	}
 	log_msg("I'm a client. Connectiong to: %s:%hu", server_addr, port);
-	return do_client(server_addr, port);
+	return do_client(server_addr, port, logic);
 }
 
 void print_help(char* prog_name)
 {
-	log_msg("Usage: %s [-a server_addr] [-p port] [-h]", prog_name);
+	log_msg("Usage: %s [-a server_addr] [-p port] [-l | -e] [-h]", prog_name);
 	log_msg("\t -h - print this help and exit");
 	log_msg("\t -a - set to client mode and specify the server's IP address, otherwise - server mode.");
 	log_msg("\t -p - specify the port number to connect to (default: 12345)");
+	log_msg("\t -l - latency measurement mode");
+	log_msg("\t -e - cache exhauster mode");
 }
 
-int do_client(char* server_addr, uint16_t port)
+int do_client(char* server_addr, uint16_t port, LogicFunction logic)
 {
 	int ans = 0;
 	int client_sock = do_connect_client(port, server_addr);
@@ -95,7 +128,7 @@ int do_client(char* server_addr, uint16_t port)
 	setup_qp(peer_info->header.qp_num, peer_info->header.port_lid, qp);
 
 	do_sync(client_sock);
-	logic_attacker(qp, peer_info, buf, mr->lkey);
+	logic(qp, peer_info, buf, mr->lkey);
 	do_sync(client_sock);
 
 	dereg_mr(mr);
