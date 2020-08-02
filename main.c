@@ -21,7 +21,7 @@ The program is based on the libibverbs
 
 typedef void(*LogicFunction)(struct ibv_qp*, ConnectionInfoExchange*, void*, uint32_t);
 
-const unsigned int CQE_SIZE = 2048;
+const unsigned int CQE_SIZE = 2048*8;
 const unsigned int CLIENT_BUF_SIZE = 1;
 
 #define SERVER_BUFFER_SIZE (PAGE_SIZE * PREFETCH_GROUP_SIZE)
