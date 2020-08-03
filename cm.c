@@ -72,7 +72,7 @@ uint64_t recv_buf_from_peer(int peer_sock, void** ptr)
 void send_info_to_peer(int peer_sock, struct ibv_qp* qp, struct ibv_context* dev_ctx, struct ibv_mr** mrs, uint32_t number_of_mrs)
 {
 	ConnectionInfoExchange* peer_info = NULL;
-	uint32_t total_bytes_for_struct = sizeof(peer_info->header) + number_of_mrs * sizeof(MrEntry);
+	uint32_t total_bytes_for_struct = sizeof(ConnectionInfoHeader) + number_of_mrs * sizeof(MrEntry);
 	ConnectionInfoExchange* my_info = malloc(total_bytes_for_struct);
 	if (NULL == my_info)
 	{

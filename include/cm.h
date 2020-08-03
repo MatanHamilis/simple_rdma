@@ -5,6 +5,7 @@
 
 extern const uint8_t IB_PORT_NUMBER;
 
+#pragma pack(push,1)
 typedef struct
 {
 	uint64_t remote_addr;
@@ -24,6 +25,7 @@ typedef struct
 	ConnectionInfoHeader header;
 	MrEntry mrs[0];
 } ConnectionInfoExchange;
+#pragma pack(pop)
 
 
 int do_connect_server(int16_t listen_port);

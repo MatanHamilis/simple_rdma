@@ -29,7 +29,7 @@ void logic_latency(struct ibv_qp* qp, ConnectionInfoExchange* peer_info, void* l
         clock_gettime(CLOCK_REALTIME, &end_time);
         long diff = (end_time.tv_sec - start_time.tv_sec)*1000000000 + (end_time.tv_nsec - start_time.tv_nsec);
         log_msg("%10llu) %u", i, diff/1000);
-        usleep(100000); // Sleeping to ensure the cache is flushed.
+        usleep(1000000); // Sleeping to ensure the cache is flushed.
         ++i;
     }
     prev = signal(SIGINT, prev);
