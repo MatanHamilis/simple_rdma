@@ -32,7 +32,7 @@ void logic_attacker(struct ibv_qp* qp, ConnectionInfoExchange* peer_info, void* 
         uint32_t reads = 0;
         for (uint32_t i = 0 ; i < peer_info->header.number_of_mrs ; ++i)
         {
-            for (uint64_t j = 0  ; j < peer_info->mrs[i].size_in_bytes ; j += PAGE_SIZE * PREFETCH_GROUP_SIZE)
+            for (uint64_t j = 0  ; j < peer_info->mrs[i].size_in_bytes ; j += PREFETCH_GROUP_SIZE)
             {
                 do_rdma_read((void*)(peer_info->mrs[i].remote_addr + j), local_buf, peer_info->mrs[i].rkey, lkey, 1, qp);
                 ++reads;
