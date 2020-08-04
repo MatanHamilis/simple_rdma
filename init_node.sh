@@ -8,7 +8,7 @@ for i in $(seq $1); do
 	ADDR_TO_INIT="cp$i"
 	ssh "$ADDR_TO_INIT" << EOF &
 	sudo apt-get update
-	sudo apt-get -y install rdma-core libibverbs1 ibverbs-utils librdmacm1 rdmacm-utils ibsim-utils ibutils libcxgb3-1 libibmad5 libibumad3 libmlx4-1 libmthca1 libnes1 infiniband-diags mstflint opensm libopensm5a perftest srptools libibverbs-dev librdmacm-dev mbw
+	sudo apt-get -y install rdma-core libibverbs1 ibverbs-utils librdmacm1 rdmacm-utils ibsim-utils ibutils libcxgb3-1 libibmad5 libibumad3 libmlx4-1 libmthca1 libnes1 infiniband-diags mstflint opensm libopensm5a perftest srptools libibverbs-dev librdmacm-dev mbw cmake
 
 	sudo modprobe rdma_cm
 	sudo modprobe ib_uverbs
